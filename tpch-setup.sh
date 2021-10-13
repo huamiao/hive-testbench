@@ -13,6 +13,48 @@ function runcommand {
 	fi
 }
 
+function create_optimized_table {
+	# Create the optimized tables.
+	FILE=$1
+	i=1
+	total=8
+
+	if [ X"$FILE" = "X" ]; then
+		echo "Must specify a file's type!"
+		return 1
+	fi
+
+	if test $SCALE -le 1000; then 
+		SCHEMA_TYPE=flat
+	else
+		SCHEMA_TYPE=partitioned
+	fi
+
+	DATABASE=tpch_${SCHEMA_TYPE}_${FILE}_${SCALE}
+	MAX_REDUCERS=2600 # ~7 years of data
+	REDUCERS=$((test ${SCALE} -gt ${MAX_REDUCERS} && echo ${MAX_REDUCERS}) || echo ${SCALE})
+
+	for t in ${TABLES}
+	do
+		echo "Optimizing table $t ($i/$total)."
+		COMMAND="hive -i settings/load-${SCHEMA_TYPE}.sql -f ddl-tpch/bin_${SCHEMA_TYPE}/${t}.sql \
+			-d DB=${DATABASE} \
+			-d SOURCE=tpch_text_${SCALE} -d BUCKETS=${BUCKETS} \
+				-d SCALE=${SCALE} -d REDUCERS=${REDUCERS} \
+			-d FILE=${FILE}"
+		runcommand "$COMMAND"
+		if [ $? -ne 0 ]; then
+			echo "Command failed, try 'export DEBUG_SCRIPT=ON' and re-running"
+			exit 1
+		fi
+		i=`expr $i + 1`
+	done
+
+	runcommand "hive -i settings/load-${SCHEMA_TYPE}.sql -f ddl-tpch/bin_${SCHEMA_TYPE}/analyze.sql --database ${DATABASE};"
+
+	echo "Data loaded into optimized database ${DATABASE}."
+}
+
 if [ ! -f tpch-gen/target/tpch-gen-1.0-SNAPSHOT.jar ]; then
 	echo "Please build the data generator with ./tpch-build.sh first"
 	exit 1
@@ -64,36 +106,6 @@ echo "TPC-H text data generation complete."
 echo "Loading text data into external tables."
 runcommand "hive -i settings/load-flat.sql -f ddl-tpch/bin_flat/alltables.sql -d DB=tpch_text_${SCALE} -d LOCATION=${DIR}/${SCALE}"
 
-# Create the optimized tables.
-i=1
-total=8
-
-if test $SCALE -le 1000; then 
-	SCHEMA_TYPE=flat
-else
-	SCHEMA_TYPE=partitioned
-fi
-
-DATABASE=tpch_${SCHEMA_TYPE}_orc_${SCALE}
-MAX_REDUCERS=2600 # ~7 years of data
-REDUCERS=$((test ${SCALE} -gt ${MAX_REDUCERS} && echo ${MAX_REDUCERS}) || echo ${SCALE})
-
-for t in ${TABLES}
-do
-	echo "Optimizing table $t ($i/$total)."
-	COMMAND="hive -i settings/load-${SCHEMA_TYPE}.sql -f ddl-tpch/bin_${SCHEMA_TYPE}/${t}.sql \
-	    -d DB=${DATABASE} \
-	    -d SOURCE=tpch_text_${SCALE} -d BUCKETS=${BUCKETS} \
-            -d SCALE=${SCALE} -d REDUCERS=${REDUCERS} \
-	    -d FILE=orc"
-	runcommand "$COMMAND"
-	if [ $? -ne 0 ]; then
-		echo "Command failed, try 'export DEBUG_SCRIPT=ON' and re-running"
-		exit 1
-	fi
-	i=`expr $i + 1`
-done
-
-hive -i settings/load-${SCHEMA_TYPE}.sql -f ddl-tpch/bin_${SCHEMA_TYPE}/analyze.sql --database ${DATABASE}; 
-
-echo "Data loaded into database ${DATABASE}."
+# Create optimized tables
+create_optimized_table orc
+create_optimized_table parquet
