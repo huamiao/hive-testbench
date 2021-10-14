@@ -36,7 +36,7 @@ function create_optimized_table {
 
 	for t in ${TABLES}
 	do
-		echo "Optimizing table $t ($i/$total)."
+		echo "Optimizing table $t ($i/$total) into $FILE."
 		COMMAND="hive -i settings/load-${SCHEMA_TYPE}.sql -f ddl-tpch/bin_${SCHEMA_TYPE}/${t}.sql \
 			-d DB=${DATABASE} \
 			-d SOURCE=tpch_text_${SCALE} -d BUCKETS=${BUCKETS} \
